@@ -16,6 +16,7 @@ namespace Microsoft::Console::Render::Atlas
     struct FontSettings
     {
         wil::com_ptr<IDWriteFontCollection> fontCollection;
+        wil::com_ptr<IDWriteFontFamily> fontFamily;
         std::wstring fontName;
         std::vector<DWRITE_FONT_FEATURE> fontFeatures;
         std::vector<DWRITE_FONT_AXIS_VALUE> fontAxisValues;
@@ -30,7 +31,7 @@ namespace Microsoft::Console::Render::Atlas
         u16 strikethroughWidth = 0;
         u16x2 doubleUnderlinePos;
         u16 thinLineWidth = 0;
-        u16 dpi = 0;
+        u16 dpi = 96;
     };
 
     struct CursorSettings
@@ -188,10 +189,6 @@ namespace Microsoft::Console::Render::Atlas
             }
         }
 
-        void UpdateFontSettings(const RenderingPayload& p) const
-        {
-        }
-
         wil::com_ptr<ID3D11Texture2D> GetBuffer() const
         {
             wil::com_ptr<ID3D11Texture2D> buffer;
@@ -269,7 +266,64 @@ namespace Microsoft::Console::Render::Atlas
         }
 
     private:
-        void _createSwapChain(const RenderingPayload& payload, IUnknown* device);
+        void _createSwapChain(const RenderingPayload& p, IUnknown* device)
+        {
+            _swapChain.reset();
+            _frameLatencyWaitableObject.reset();
+
+            DXGI_SWAP_CHAIN_DESC1 desc{};
+            desc.Width = p.s->targetSize.x;
+            desc.Height = p.s->targetSize.y;
+            desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            desc.SampleDesc.Count = 1;
+            desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            // Sometimes up to 2 buffers are locked, for instance during screen capture or when moving the window.
+            // 3 buffers seems to guarantee a stable framerate at display frequency at all times.
+            desc.BufferCount = 3;
+            desc.Scaling = DXGI_SCALING_NONE;
+            // DXGI_SWAP_EFFECT_FLIP_DISCARD is a mode that was created at a time were display drivers
+            // lacked support for Multiplane Overlays (MPO) and were copying buffers was expensive.
+            // This allowed DWM to quickly draw overlays (like gamebars) on top of rendered content.
+            // With faster GPU memory in general and with support for MPO in particular this isn't
+            // really an advantage anymore. Instead DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL allows for a
+            // more "intelligent" composition and display updates to occur like Panel Self Refresh
+            // (PSR) which requires dirty rectangles (Present1 API) to work correctly.
+            desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+            // If our background is opaque we can enable "independent" flips by setting DXGI_ALPHA_MODE_IGNORE.
+            // As our swap chain won't have to compose with DWM anymore it reduces the display latency dramatically.
+            desc.AlphaMode = p.s->target->enableTransparentBackground ? DXGI_ALPHA_MODE_PREMULTIPLIED : DXGI_ALPHA_MODE_IGNORE;
+            desc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+
+            wil::com_ptr<IDXGISwapChain1> swapChain0;
+
+            if (p.s->target->hwnd)
+            {
+                THROW_IF_FAILED(p.dxgiFactory->CreateSwapChainForHwnd(device, p.s->target->hwnd, &desc, nullptr, nullptr, swapChain0.addressof()));
+            }
+            else
+            {
+                // As per: https://docs.microsoft.com/en-us/windows/win32/api/dcomp/nf-dcomp-dcompositioncreatesurfacehandle
+                static constexpr DWORD COMPOSITIONSURFACE_ALL_ACCESS = 0x0003L;
+                THROW_IF_FAILED(DCompositionCreateSurfaceHandle(COMPOSITIONSURFACE_ALL_ACCESS, nullptr, _swapChainHandle.addressof()));
+                THROW_IF_FAILED(p.dxgiFactory.query<IDXGIFactoryMedia>()->CreateSwapChainForCompositionSurfaceHandle(device, _swapChainHandle.get(), &desc, nullptr, swapChain0.addressof()));
+            }
+
+            _swapChain = swapChain0.query<IDXGISwapChain2>();
+            _targetGeneration = p.s->target.generation();
+            _targetSize = p.s->targetSize;
+            _waitForPresentation = true;
+
+            WaitUntilCanRender();
+
+            if (p.swapChainChangedCallback)
+            {
+                try
+                {
+                    p.swapChainChangedCallback(_swapChainHandle.get());
+                }
+                CATCH_LOG()
+            }
+        }
 
         wil::com_ptr<IDXGISwapChain2> _swapChain;
         wil::unique_handle _swapChainHandle;

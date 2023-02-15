@@ -333,8 +333,20 @@ void AtlasEngine::_recreateBackend()
 
     const auto device = device0.query<ID3D11Device2>();
     const auto deviceContext = deviceContext0.query<ID3D11DeviceContext2>();
-
-    d2dMode |= featureLevel < D3D_FEATURE_LEVEL_10_0;
+    
+    if (featureLevel < D3D_FEATURE_LEVEL_10_0)
+    {
+        d2dMode = true;
+    }
+    else if (featureLevel < D3D_FEATURE_LEVEL_11_0)
+    {
+        D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS options;
+        THROW_IF_FAILED(device->CheckFeatureSupport(D3D11_FEATURE_D3D10_X_HARDWARE_OPTIONS, &options, sizeof(options)));
+        if (!options.ComputeShaders_Plus_RawAndStructuredBuffers_Via_Shader_4_x)
+        {
+            d2dMode = true;
+        }
+    }
 
     if (d2dMode)
     {

@@ -100,24 +100,6 @@ namespace Microsoft::Console::Render::Atlas
         };
 
     private:
-        struct FontMetrics
-        {
-            wil::com_ptr<IDWriteFontCollection> fontCollection;
-            wil::com_ptr<IDWriteFontFamily> fontFamily;
-            std::wstring fontName;
-            f32 baselineInDIP = 0.0f;
-            f32 fontSizeInDIP = 0.0f;
-            f32 advanceScale = 0;
-            u16x2 cellSize;
-            u16 fontWeight = 0;
-            u16 underlinePos = 0;
-            u16 underlineWidth = 0;
-            u16 strikethroughPos = 0;
-            u16 strikethroughWidth = 0;
-            u16x2 doubleUnderlinePos;
-            u16 thinLineWidth = 0;
-        };
-
         // These flags are shared with shader_ps.hlsl.
         // If you change this be sure to copy it over to shader_ps.hlsl.
         //
@@ -198,7 +180,7 @@ namespace Microsoft::Console::Render::Atlas
         // AtlasEngine.api.cpp
         void _resolveTransparencySettings() noexcept;
         void _updateFont(const wchar_t* faceName, const FontInfoDesired& fontInfoDesired, FontInfo& fontInfo, const std::unordered_map<std::wstring_view, uint32_t>& features, const std::unordered_map<std::wstring_view, float>& axes);
-        void _resolveFontMetrics(const wchar_t* faceName, const FontInfoDesired& fontInfoDesired, FontInfo& fontInfo, FontMetrics* fontMetrics = nullptr) const;
+        void _resolveFontMetrics(const wchar_t* faceName, const FontInfoDesired& fontInfoDesired, FontInfo& fontInfo, FontSettings* fontMetrics = nullptr) const;
 
         // AtlasEngine.r.cpp
         bool _drawGlyphRun(D2D_POINT_2F baselineOrigin, const DWRITE_GLYPH_RUN* glyphRun, ID2D1SolidColorBrush* foregroundBrush) const noexcept;
@@ -227,6 +209,12 @@ namespace Microsoft::Console::Render::Atlas
 
             // This structure is loosely sorted in chunks from "very often accessed together"
             // to seldom accessed and/or usually not together.
+            
+            bool invalidatedTitle = false;
+            // These two are redundant with TargetSettings/MiscellaneousSettings, but that's because _resolveTransparencySettings()
+            // turns the given settings into potentially different actual settings (which are then written into the Settings).
+            bool enableTransparentBackground = false;
+            u8 antialiasingMode = D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE;
 
             std::vector<wchar_t> bufferLine;
             std::vector<u16> bufferLineColumn;
@@ -237,21 +225,13 @@ namespace Microsoft::Console::Render::Atlas
             Buffer<DWRITE_SHAPING_GLYPH_PROPERTIES> glyphProps;
             Buffer<f32> glyphAdvances;
             Buffer<DWRITE_GLYPH_OFFSET> glyphOffsets;
-            std::vector<DWRITE_FONT_FEATURE> fontFeatures; // changes are flagged as ApiInvalidations::Font|Size
-            std::vector<DWRITE_FONT_AXIS_VALUE> fontAxisValues; // changes are flagged as ApiInvalidations::Font|Size
-            FontMetrics fontMetrics; // changes are flagged as ApiInvalidations::Font|Size
-
-            u16x2 cellCount; // caches `sizeInPixel / cellSize`
-            u16x2 sizeInPixel; // changes are flagged as ApiInvalidations::Size
 
             // UpdateDrawingBrushes()
-            u32 backgroundOpaqueMixin = 0xff000000; // changes are flagged as ApiInvalidations::SwapChain
+            u32 backgroundOpaqueMixin = 0xff000000;
             u32x2 currentColor;
             AtlasKeyAttributes attributes{};
             u16x2 lastPaintBufferLineCoord;
             CellFlags flags = CellFlags::None;
-            // SetSelectionBackground()
-            u32 selectionColor = 0x7fffffff;
             // UpdateHyperlinkHoveredId()
             u16 hyperlinkHoveredId = 0;
             bool bufferLineWasHyperlinked = false;
@@ -262,21 +242,6 @@ namespace Microsoft::Console::Render::Atlas
             u16r invalidatedCursorArea = invalidatedAreaNone;
             u16x2 invalidatedRows = invalidatedRowsNone; // x is treated as "top" and y as "bottom"
             i16 scrollOffset = 0;
-
-            std::function<void(HRESULT)> warningCallback;
-            std::function<void(HANDLE)> swapChainChangedCallback;
-            wil::unique_handle swapChainHandle;
-            HWND hwnd = nullptr;
-            u16 dpi = USER_DEFAULT_SCREEN_DPI; // changes are flagged as ApiInvalidations::Font|Size
-            u8 antialiasingMode = D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE; // changes are flagged as ApiInvalidations::Font
-            u8 realizedAntialiasingMode = D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE; // caches antialiasingMode, depends on antialiasingMode and backgroundOpaqueMixin, see _resolveTransparencySettings
-            bool enableTransparentBackground = false;
-
-            std::wstring customPixelShaderPath; // changes are flagged as ApiInvalidations::Device
-            bool useRetroTerminalEffect = false; // changes are flagged as ApiInvalidations::Device
-            bool useSoftwareRendering = false; // changes are flagged as ApiInvalidations::Device
-
-            ApiInvalidations invalidations = ApiInvalidations::Device;
         } _api;
 
 #undef ATLAS_POD_OPS

@@ -21,6 +21,7 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="AtlasEngine.cpp" />
+    <ClCompile Include="stb_rect_pack.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BackendD2D.h" />

@@ -423,57 +423,51 @@ void BackendD3D11::Render(const RenderingPayload& p)
 
         if (_fontGeneration != p.s->font.generation())
         {
-            _swapChainManager.UpdateFontSettings(p);
             _d2dRenderTarget.reset();
-            _atlasSizeInPixel = {};
             _fontGeneration = p.s->font.generation();
         }
 
         if (_miscGeneration != p.s->misc.generation())
         {
-            _createCustomShaderResources(p);
             _miscGeneration = p.s->misc.generation();
         }
 
-        if (_targetSize != p.s->targetSize)
+        if (_cellCount != p.s->cellCount)
         {
-            D3D11_VIEWPORT viewport{};
-            viewport.Width = static_cast<float>(p.s->targetSize.x);
-            viewport.Height = static_cast<float>(p.s->targetSize.y);
-            _deviceContext->RSSetViewports(1, &viewport);
-            _targetSize = p.s->targetSize;
+            if (_customPixelShader)
+            {
+                D3D11_TEXTURE2D_DESC desc{};
+                desc.Width = p.s->targetSize.x;
+                desc.Height = p.s->targetSize.y;
+                desc.MipLevels = 1;
+                desc.ArraySize = 1;
+                desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                desc.SampleDesc = { 1, 0 };
+                desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+                THROW_IF_FAILED(_device->CreateTexture2D(&desc, nullptr, _customOffscreenTexture.addressof()));
+                THROW_IF_FAILED(_device->CreateShaderResourceView(_customOffscreenTexture.get(), nullptr, _customOffscreenTextureView.addressof()));
+                THROW_IF_FAILED(_device->CreateRenderTargetView(_customOffscreenTexture.get(), nullptr, _customOffscreenTextureTargetView.addressof()));
+            }
+
+            {
+                D3D11_TEXTURE2D_DESC desc{};
+                desc.Width = p.s->cellCount.x;
+                desc.Height = p.s->cellCount.y;
+                desc.MipLevels = 1;
+                desc.ArraySize = 1;
+                desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                desc.SampleDesc = { 1, 0 };
+                desc.Usage = D3D11_USAGE_DYNAMIC;
+                desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+                THROW_IF_FAILED(_device->CreateTexture2D(&desc, nullptr, _perCellColor.addressof()));
+                THROW_IF_FAILED(_device->CreateShaderResourceView(_perCellColor.get(), nullptr, _perCellColorView.addressof()));
+            }
+
+            _cellCount = p.s->cellCount;
         }
 
-        if (p.s->cellCount != p.s->cellCount)
-        {
-            _cellBuffer.reset();
-            _cellView.reset();
-
-            D3D11_BUFFER_DESC desc{};
-            desc.ByteWidth = gsl::narrow<u32>(static_cast<size_t>(p.s->cellCount.x) * static_cast<size_t>(p.s->cellCount.y) * sizeof(Cell));
-            desc.Usage = D3D11_USAGE_DYNAMIC;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-            desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-            desc.StructureByteStride = sizeof(Cell);
-            THROW_IF_FAILED(_device->CreateBuffer(&desc, nullptr, _cellBuffer.put()));
-            THROW_IF_FAILED(_device->CreateShaderResourceView(_cellBuffer.get(), nullptr, _cellView.put()));
-
-            p.s->cellCount = p.s->cellCount;
-        }
-
-        _updateConstantBuffer(p);
-        _setShaderResources(p);
         _generation = p.s.generation();
-    }
-    
-    {
-#pragma warning(suppress : 26494) // Variable 'mapped' is uninitialized. Always initialize an object (type.5).
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        THROW_IF_FAILED(_deviceContext->Map(_cellBuffer.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
-        assert(mapped.RowPitch >= p.cells.size() * sizeof(Cell));
-        memcpy(mapped.pData, p.cells.data(), p.cells.size() * sizeof(Cell));
-        _deviceContext->Unmap(_cellBuffer.get(), 0);
     }
 
     if (!_atlasBuffer)
@@ -501,24 +495,24 @@ void BackendD3D11::Render(const RenderingPayload& p)
             const auto surface = _atlasBuffer.query<IDXGISurface>();
 
             wil::com_ptr<IDWriteRenderingParams1> renderingParams;
-            DWrite_GetRenderParams(_sr.dwriteFactory.get(), &_gamma, &_cleartypeEnhancedContrast, &_grayscaleEnhancedContrast, renderingParams.addressof());
+            DWrite_GetRenderParams(p.dwriteFactory.get(), &_gamma, &_cleartypeEnhancedContrast, &_grayscaleEnhancedContrast, renderingParams.addressof());
 
             D2D1_RENDER_TARGET_PROPERTIES props{};
             props.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
             props.pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED };
-            props.dpiX = static_cast<float>(_dpi);
-            props.dpiY = static_cast<float>(_dpi);
+            props.dpiX = static_cast<float>(p.s->font->dpi);
+            props.dpiY = static_cast<float>(p.s->font->dpi);
             wil::com_ptr<ID2D1RenderTarget> renderTarget;
-            THROW_IF_FAILED(_sr.d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, renderTarget.addressof()));
+            THROW_IF_FAILED(p.d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, renderTarget.addressof()));
             _d2dRenderTarget = renderTarget.query<ID2D1DeviceContext>();
             _d2dRenderTarget4 = renderTarget.query<ID2D1DeviceContext4>();
 
             // We don't really use D2D for anything except DWrite, but it
             // can't hurt to ensure that everything it does is pixel aligned.
             _d2dRenderTarget->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
-            // In case _api.realizedAntialiasingMode is D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE we'll
+            // In case p.s->misc->antialiasingMode is D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE we'll
             // continuously adjust it in BackendD3D11::_drawGlyph. See _drawGlyph.
-            _d2dRenderTarget->SetTextAntialiasMode(static_cast<D2D1_TEXT_ANTIALIAS_MODE>(_api.realizedAntialiasingMode));
+            _d2dRenderTarget->SetTextAntialiasMode(static_cast<D2D1_TEXT_ANTIALIAS_MODE>(p.s->misc->antialiasingMode));
             // Ensure that D2D uses the exact same gamma as our shader uses.
             _d2dRenderTarget->SetTextRenderingParams(renderingParams.get());
         }
@@ -528,7 +522,7 @@ void BackendD3D11::Render(const RenderingPayload& p)
             _brushColor = 0xffffffff;
         }
 
-        switch (_api.realizedAntialiasingMode)
+        switch (p.s->misc->antialiasingMode)
         {
         case D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE:
             _textPixelShader = _cleartypePixelShader;
@@ -551,8 +545,8 @@ void BackendD3D11::Render(const RenderingPayload& p)
         // Background
         {
             auto& ref = _vertexInstanceData.emplace_back();
-            ref.rect = { 0.0f, 0.0f, static_cast<f32>(_api.sizeInPixel.x), static_cast<f32>(_api.sizeInPixel.y) };
-            ref.tex = { 0.0f, 0.0f, static_cast<f32>(_api.sizeInPixel.x) / static_cast<f32>(p.s->font->cellSize.x), static_cast<f32>(_api.sizeInPixel.y) / static_cast<f32>(p.s->font->cellSize.y) };
+            ref.rect = { 0.0f, 0.0f, static_cast<f32>(p.s->targetSize.x), static_cast<f32>(p.s->targetSize.y) };
+            ref.tex = { 0.0f, 0.0f, static_cast<f32>(p.s->targetSize.x) / static_cast<f32>(p.s->font->cellSize.x), static_cast<f32>(p.s->targetSize.y) / static_cast<f32>(p.s->font->cellSize.y) };
             ref.color = 0;
             ref.shadingType = 1;
         }
@@ -584,7 +578,7 @@ void BackendD3D11::Render(const RenderingPayload& p)
                                     _d2dRenderTarget->BeginDraw();
                                 }
 
-                                _drawGlyph(entry, m.fontEmSize);
+                                _drawGlyph(p, entry, m.fontEmSize);
                             }
 
                             if (entry.wh != u16x2{})
@@ -619,7 +613,7 @@ void BackendD3D11::Render(const RenderingPayload& p)
                 }
             }
 
-            {
+            /*{
                 auto it = _metadata.begin();
 
                 for (u16 y = 0; y < p.s->cellCount.y; ++y)
@@ -724,7 +718,7 @@ void BackendD3D11::Render(const RenderingPayload& p)
                         }
                     }
                 }
-            }
+            }*/
 
             textRange.y = _vertexInstanceData.size() - textRange.x;
         }
@@ -745,7 +739,7 @@ void BackendD3D11::Render(const RenderingPayload& p)
         }
 
         // Selection
-        {
+        /*{
             selectionRange.x = _vertexInstanceData.size();
 
             size_t y = 0;
@@ -768,19 +762,18 @@ void BackendD3D11::Render(const RenderingPayload& p)
             }
 
             selectionRange.y = _vertexInstanceData.size() - selectionRange.x;
-        }
+        }*/
     }
 
-    if (WI_IsFlagSet(_invalidations, RenderInvalidations::ConstBuffer))
+    if constexpr (true)
     {
         ConstBuffer data;
-        data.positionScale = { 2.0f / _api.sizeInPixel.x, -2.0f / _api.sizeInPixel.y, 1, 1 };
+        data.positionScale = { 2.0f / p.s->targetSize.x, -2.0f / p.s->targetSize.y, 1, 1 };
         DWrite_GetGammaRatios(_gamma, data.gammaRatios);
         data.cleartypeEnhancedContrast = _cleartypeEnhancedContrast;
         data.grayscaleEnhancedContrast = _grayscaleEnhancedContrast;
 #pragma warning(suppress : 26447) // The function is declared 'noexcept' but calls function '...' which may throw exceptions (f.6).
         _deviceContext->UpdateSubresource(_constantBuffer.get(), 0, nullptr, &data, 0, 0);
-        WI_ClearFlag(_invalidations, RenderInvalidations::ConstBuffer);
     }
 
     if (_vertexInstanceData.size() > _vertexBuffers1Size)
@@ -834,8 +827,8 @@ void BackendD3D11::Render(const RenderingPayload& p)
 
             // RS: Rasterizer Stage
             D3D11_VIEWPORT viewport{};
-            viewport.Width = static_cast<float>(_api.sizeInPixel.x);
-            viewport.Height = static_cast<float>(_api.sizeInPixel.y);
+            viewport.Width = static_cast<float>(p.s->targetSize.x);
+            viewport.Height = static_cast<float>(p.s->targetSize.y);
             _deviceContext->RSSetViewports(1, &viewport);
             _deviceContext->RSSetState(_rasterizerState.get());
 
@@ -897,12 +890,17 @@ void BackendD3D11::Render(const RenderingPayload& p)
     _swapChainManager.Present(p);
 }
 
+bool BackendD3D11::RequiresContinuousRedraw() noexcept
+{
+    return _requiresContinuousRedraw;
+}
+
 void BackendD3D11::WaitUntilCanRender() noexcept
 {
     _swapChainManager.WaitUntilCanRender();
 }
 
-void BackendD3D11::_drawGlyph(GlyphCacheEntry& entry, f32 fontEmSize)
+void BackendD3D11::_drawGlyph(const RenderingPayload& p, GlyphCacheEntry& entry, f32 fontEmSize)
 {
     DWRITE_GLYPH_RUN glyphRun{};
     glyphRun.fontFace = entry.fontFace;
@@ -916,10 +914,10 @@ void BackendD3D11::_drawGlyph(GlyphCacheEntry& entry, f32 fontEmSize)
         return;
     }
 
-    box.left = roundf(box.left * _pixelPerDIP) - 1.0f;
-    box.top = roundf(box.top * _pixelPerDIP) - 1.0f;
-    box.right = roundf(box.right * _pixelPerDIP) + 1.0f;
-    box.bottom = roundf(box.bottom * _pixelPerDIP) + 1.0f;
+    box.left = roundf(box.left * p.d.font.pixelPerDIP) - 1.0f;
+    box.top = roundf(box.top * p.d.font.pixelPerDIP) - 1.0f;
+    box.right = roundf(box.right * p.d.font.pixelPerDIP) + 1.0f;
+    box.bottom = roundf(box.bottom * p.d.font.pixelPerDIP) + 1.0f;
 
     stbrp_rect rect{};
     rect.w = gsl::narrow_cast<int>(box.right - box.left);
@@ -931,10 +929,10 @@ void BackendD3D11::_drawGlyph(GlyphCacheEntry& entry, f32 fontEmSize)
     }
 
     const D2D1_POINT_2F baseline{
-        (rect.x - box.left) * _dipPerPixel,
-        (rect.y - box.top) * _dipPerPixel,
+        (rect.x - box.left) * p.d.font.dipPerPixel,
+        (rect.y - box.top) * p.d.font.dipPerPixel,
     };
-    const auto colorGlyph = _drawGlyphRun(baseline, &glyphRun, _brush.get());
+    const auto colorGlyph = _drawGlyphRun(p.dwriteFactory4.get(), _d2dRenderTarget.get(), _d2dRenderTarget4.get(), baseline, &glyphRun, _brush.get());
 
     entry.xy.x = gsl::narrow_cast<u16>(rect.x);
     entry.xy.y = gsl::narrow_cast<u16>(rect.y);

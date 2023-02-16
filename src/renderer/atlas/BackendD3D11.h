@@ -14,6 +14,7 @@ namespace Microsoft::Console::Render::Atlas
         BackendD3D11(wil::com_ptr<ID3D11Device2> device, wil::com_ptr<ID3D11DeviceContext2> deviceContext);
 
         void Render(const RenderingPayload& payload) override;
+        bool RequiresContinuousRedraw() noexcept override;
         void WaitUntilCanRender() noexcept override;
 
     private:
@@ -176,7 +177,7 @@ namespace Microsoft::Console::Render::Atlas
 #pragma warning(suppress : 4324) // 'CustomConstBuffer': structure was padded due to alignment specifier
         };
 
-        void _drawGlyph(GlyphCacheEntry& entry, f32 fontEmSize);
+        void _drawGlyph(const RenderingPayload& p, GlyphCacheEntry& entry, f32 fontEmSize);
 
         static constexpr bool debugNvidiaQuadFill = false;
         
@@ -237,7 +238,6 @@ namespace Microsoft::Console::Render::Atlas
         GlyphCacheMap _glyphCache;
         std::vector<stbrp_node> _rectPackerData;
         stbrp_context _rectPacker{};
-        Buffer<BufferLineMetadata> _metadata;
         std::vector<ShapedRow> _rows;
         std::vector<VertexInstanceData> _vertexInstanceData;
         u32 _instanceCount = 6;
@@ -252,6 +252,11 @@ namespace Microsoft::Console::Render::Atlas
         std::filesystem::path _sourceDirectory;
         wil::unique_folder_change_reader_nothrow _sourceCodeWatcher;
         std::atomic<int64_t> _sourceCodeInvalidationTime{ INT64_MAX };
+        float _gamma = 0;
+        float _cleartypeEnhancedContrast = 0;
+        float _grayscaleEnhancedContrast = 0;
+        u32 _brushColor = 0;
+        u16x2 _cellCount;
 #endif
     };
 }

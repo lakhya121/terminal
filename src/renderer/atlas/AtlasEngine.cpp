@@ -4,6 +4,7 @@
 #include "pch.h"
 #include "AtlasEngine.h"
 
+#include "Backend.h"
 #include "../../interactivity/win32/CustomWindowMessages.h"
 
 // #### NOTE ####
@@ -79,9 +80,9 @@ try
         {
             _recreateFontDependentResources();
         }
-        if (fontChanged || cellCountChanged)
+        if (cellCountChanged)
         {
-            _recreateSizeDependentResources();
+            _recreateCellCountDependentResources();
         }
 
         _api.invalidatedRows = invalidatedRowsAll;
@@ -235,29 +236,6 @@ try
         _api.bufferLineColumn.pop_back();
     }
 
-    // `TextBuffer` is buggy and allows a `Trailing` `DbcsAttribute` to be written
-    // into the first column. Since other code then blindly assumes that there's a
-    // preceding `Leading` character, we'll get called with a X coordinate of -1.
-    //
-    // This block can be removed after GH#13626 is merged.
-    if (coord.x < 0)
-    {
-        size_t offset = 0;
-        for (const auto& cluster : clusters)
-        {
-            offset++;
-            coord.x += cluster.GetColumns();
-            if (coord.x >= 0)
-            {
-                _api.bufferLine.insert(_api.bufferLine.end(), coord.x, L' ');
-                _api.bufferLineColumn.insert(_api.bufferLineColumn.end(), coord.x, 0u);
-                break;
-            }
-        }
-
-        clusters = clusters.subspan(offset);
-    }
-
     const auto x = gsl::narrow_cast<u16>(clamp<int>(coord.x, 0, _p.s->cellCount.x));
 
     // Due to the current IRenderEngine interface (that wasn't refactored yet) we need to assemble
@@ -277,8 +255,8 @@ try
 
         _api.bufferLineColumn.emplace_back(column);
 
-        const BufferLineMetadata metadata{ _api.currentColor, _api.flags };
-        std::fill_n(_getBufferLineMetadata(x, y), column - x, metadata);
+        std::fill(_api.colorsForeground.begin() + x, _api.colorsForeground.begin() + column, _api.currentColor.x);
+        std::fill_n(_p.backgroundBitmap.begin() + (y * _p.s->cellCount.x + x), column - x, _api.currentColor.y);
     }
 
     _api.lastPaintBufferLineCoord = { x, y };
@@ -483,16 +461,34 @@ void AtlasEngine::_recreateFontDependentResources()
     }
 }
 
+void AtlasEngine::_recreateCellCountDependentResources()
+{
+    // Let's guess that every cell consists of a surrogate pair.
+    const auto projectedTextSize = static_cast<size_t>(_p.s->cellCount.x) * 2;
+    // IDWriteTextAnalyzer::GetGlyphs says:
+    //   The recommended estimate for the per-glyph output buffers is (3 * textLength / 2 + 16).
+    const auto projectedGlyphSize = 3 * projectedTextSize / 2 + 16;
+
+    _api.bufferLine = std::vector<wchar_t>{};
+    _api.bufferLine.reserve(projectedTextSize);
+    _api.bufferLineColumn.reserve(projectedTextSize + 1);
+    _api.colorsForeground = Buffer<u32>(_p.s->cellCount.x);
+
+    _api.analysisResults = std::vector<TextAnalysisSinkResult>{};
+    _api.clusterMap = Buffer<u16>{ projectedTextSize };
+    _api.textProps = Buffer<DWRITE_SHAPING_TEXT_PROPERTIES>{ projectedTextSize };
+    _api.glyphIndices = Buffer<u16>{ projectedGlyphSize };
+    _api.glyphProps = Buffer<DWRITE_SHAPING_GLYPH_PROPERTIES>{ projectedGlyphSize };
+    _api.glyphAdvances = Buffer<f32>{ projectedGlyphSize };
+    _api.glyphOffsets = Buffer<DWRITE_GLYPH_OFFSET>{ projectedGlyphSize };
+
+    _p.rows = std::vector<ShapedRow>(_p.s->cellCount.y);
+    _p.backgroundBitmap = std::vector<u32>(static_cast<size_t>(_p.s->cellCount.x) * _p.s->cellCount.y);
+}
+
 const Buffer<DWRITE_FONT_AXIS_VALUE>& AtlasEngine::_getTextFormatAxis(bool bold, bool italic) const noexcept
 {
     return _p.d.font.textFormatAxes[italic][bold];
-}
-
-AtlasEngine::BufferLineMetadata* AtlasEngine::_getBufferLineMetadata(u16 x, u16 y) noexcept
-{
-    assert(x < _p.s->cellCount.x);
-    assert(y < _p.s->cellCount.y);
-    return _r.metadata.data() + static_cast<size_t>(_p.s->cellCount.x) * y + x;
 }
 
 void AtlasEngine::_flushBufferLine()
@@ -510,42 +506,8 @@ void AtlasEngine::_flushBufferLine()
     // This would seriously blow us up otherwise.
     Expects(_api.bufferLineColumn.size() == _api.bufferLine.size() + 1);
 
-    // NOTE:
-    // This entire function is one huge hack to see if it works.
-
-    // UH OH UNICODE MADNESS AHEAD
-    //
-    // # What do we want?
-    //
-    // Segment a line of text (_api.bufferLine) into unicode "clusters".
-    // Each cluster is one "whole" glyph with diacritics, ligatures, zero width joiners
-    // and whatever else, that should be cached as a whole in our texture atlas.
-    //
-    // # How do we get that?
-    //
-    // ## The unfortunate preface
-    //
-    // DirectWrite can be "reluctant" to segment text into clusters and I found no API which offers simply that.
-    // What it offers are a large number of low level APIs that can sort of be used in combination to do this.
-    // The resulting text parsing is very slow unfortunately, consuming up to 95% of rendering time in extreme cases.
-    //
-    // ## The actual approach
-    //
-    // DirectWrite has 2 APIs which can segment text properly (including ligatures and zero width joiners):
-    // * IDWriteTextAnalyzer1::GetTextComplexity
-    // * IDWriteTextAnalyzer::GetGlyphs
-    //
-    // Both APIs require us to attain an IDWriteFontFace as the functions themselves don't handle font fallback.
-    // This forces us to call IDWriteFontFallback::MapCharacters first.
-    //
-    // Additionally IDWriteTextAnalyzer::GetGlyphs requires an instance of DWRITE_SCRIPT_ANALYSIS,
-    // which can only be attained by running IDWriteTextAnalyzer::AnalyzeScript first.
-    //
-    // Font fallback with IDWriteFontFallback::MapCharacters is very slow.
-
     auto& row = _p.rows[_api.lastPaintBufferLineCoord.y];
     const auto& textFormatAxis = _getTextFormatAxis(_api.attributes.bold, _api.attributes.italic);
-    const auto metadata = _getBufferLineMetadata(0, _api.lastPaintBufferLineCoord.y);
 
     TextAnalysisSource analysisSource{ _api.bufferLine.data(), gsl::narrow<UINT32>(_api.bufferLine.size()) };
     TextAnalysisSink analysisSink{ _api.analysisResults };
@@ -628,7 +590,7 @@ void AtlasEngine::_flushBufferLine()
                 for (size_t i = 0; i < complexityLength; ++i)
                 {
                     const auto col = _api.bufferLineColumn[idx + i];
-                    const auto colors = metadata[col].colors;
+                    const auto fg = _api.colorsForeground[col];
                     f32 glyphAdvance;
 
                     if constexpr (!debugProportionalText)
@@ -656,9 +618,7 @@ void AtlasEngine::_flushBufferLine()
                     row.glyphIndices.emplace_back(_api.glyphIndices[i]);
                     row.glyphAdvances.emplace_back(glyphAdvance);
                     row.glyphOffsets.emplace_back();
-                    row.colors.emplace_back(colors.x);
-
-                    std::fill_n(_p.backgroundBitmap.begin() + _api.lastPaintBufferLineCoord.y * _p.s->cellCount.x + col, 1, metadata[col].colors.y);
+                    row.colors.emplace_back(fg);
                 }
             }
             else
@@ -782,7 +742,7 @@ void AtlasEngine::_flushBufferLine()
 
                         const auto col1 = _api.bufferLineColumn[a.textPosition + beg];
                         const auto col2 = _api.bufferLineColumn[a.textPosition + i];
-                        const auto colors = metadata[col1].colors;
+                        const auto fg = _api.colorsForeground[col1];
 
                         if constexpr (!debugProportionalText)
                         {
@@ -795,9 +755,7 @@ void AtlasEngine::_flushBufferLine()
                             _api.glyphAdvances[nextCluster - 1] += expectedAdvance - actualAdvance;
                         }
 
-                        row.colors.insert(row.colors.end(), nextCluster - prevCluster, colors.x);
-
-                        std::fill_n(_p.backgroundBitmap.begin() + _api.lastPaintBufferLineCoord.y * _p.s->cellCount.x + col1, col2 - col1, metadata[col1].colors.y);
+                        row.colors.insert(row.colors.end(), nextCluster - prevCluster, fg);
 
                         prevCluster = nextCluster;
                         beg = i;

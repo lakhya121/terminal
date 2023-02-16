@@ -103,6 +103,11 @@ void BackendD2D::Render(const RenderingPayload& p)
     THROW_IF_FAILED(_d2dRenderTarget->EndDraw());
 }
 
+bool BackendD2D::RequiresContinuousRedraw() noexcept
+{
+    return false;
+}
+
 void BackendD2D::WaitUntilCanRender() noexcept
 {
 }

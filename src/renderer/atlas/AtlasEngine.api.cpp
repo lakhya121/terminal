@@ -4,6 +4,7 @@
 #include "pch.h"
 #include "AtlasEngine.h"
 
+#include "Backend.h"
 #include "../base/FontCache.h"
 
 // #### NOTE ####

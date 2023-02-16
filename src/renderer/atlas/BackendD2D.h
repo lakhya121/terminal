@@ -8,6 +8,13 @@ namespace Microsoft::Console::Render::Atlas
 {
     struct BackendD2D : IBackend
     {
+        BackendD2D(wil::com_ptr<ID3D11Device2> device, wil::com_ptr<ID3D11DeviceContext2> deviceContext);
+
+        void Render(const RenderingPayload& payload) override;
+        bool RequiresContinuousRedraw() noexcept override;
+        void WaitUntilCanRender() noexcept override;
+
+    private:
         ID2D1Brush* _brushWithColor(u32 color);
         void _d2dDrawLine(const RenderingPayload& p, u16r rect, u16 pos, u16 width, u32 color, ID2D1StrokeStyle* strokeStyle);
         void _d2dFillRectangle(const RenderingPayload& p, u16r rect, u32 color);
@@ -17,12 +24,7 @@ namespace Microsoft::Console::Render::Atlas
         void _d2dCellFlagRendererUnderlineDotted(const RenderingPayload& p, u16r rect, u32 color);
         void _d2dCellFlagRendererUnderlineDouble(const RenderingPayload& p, u16r rect, u32 color);
         void _d2dCellFlagRendererStrikethrough(const RenderingPayload& p, u16r rect, u32 color);
-        BackendD2D(wil::com_ptr<ID3D11Device2> device, wil::com_ptr<ID3D11DeviceContext2> deviceContext);
-        
-        void Render(const RenderingPayload& payload) override;
-        void WaitUntilCanRender() noexcept override;
 
-    private:
         SwapChainManager _swapChainManager;
 
         wil::com_ptr<ID3D11Device1> _device;
@@ -79,6 +81,5 @@ namespace Microsoft::Console::Render::Atlas
         til::generation_t _fontGeneration;
         til::generation_t _miscGeneration;
         u32 _brushColor = 0;
-
     };
 }

@@ -3,14 +3,9 @@
 
 #pragma once
 
-#include <d2d1_3.h>
-#include <d3d11_1.h>
-#include <dwrite_3.h>
-
 #include "../../renderer/inc/IRenderEngine.hpp"
-#include "DWriteTextAnalysis.h"
 #include "common.h"
-#include "Backend.h"
+#include "DWriteTextAnalysis.h"
 
 namespace Microsoft::Console::Render::Atlas
 {
@@ -138,12 +133,6 @@ namespace Microsoft::Console::Render::Atlas
             ATLAS_POD_OPS(CachedCursorOptions)
         };
 
-        struct BufferLineMetadata
-        {
-            u32x2 colors;
-            CellFlags flags = CellFlags::None;
-        };
-
         // Handled in BeginPaint()
         enum class ApiInvalidations : u8
         {
@@ -168,13 +157,9 @@ namespace Microsoft::Console::Render::Atlas
 
         // AtlasEngine.cpp
         [[nodiscard]] HRESULT _handleException(const wil::ResultException& exception) noexcept;
-        __declspec(noinline) void _createResources();
-        void _releaseSwapChain();
-        __declspec(noinline) void _createSwapChain();
-        __declspec(noinline) void _recreateSizeDependentResources();
         __declspec(noinline) void _recreateFontDependentResources();
+        __declspec(noinline) void _recreateCellCountDependentResources();
         const Buffer<DWRITE_FONT_AXIS_VALUE>& _getTextFormatAxis(bool bold, bool italic) const noexcept;
-        BufferLineMetadata* _getBufferLineMetadata(u16 x, u16 y) noexcept;
         void _flushBufferLine();
 
         // AtlasEngine.api.cpp
@@ -183,8 +168,6 @@ namespace Microsoft::Console::Render::Atlas
         void _resolveFontMetrics(const wchar_t* faceName, const FontInfoDesired& fontInfoDesired, FontInfo& fontInfo, FontSettings* fontMetrics = nullptr) const;
 
         // AtlasEngine.r.cpp
-        bool _drawGlyphRun(D2D_POINT_2F baselineOrigin, const DWRITE_GLYPH_RUN* glyphRun, ID2D1SolidColorBrush* foregroundBrush) const noexcept;
-        void _drawGlyph(GlyphCacheEntry& entry, f32 fontEmSize);
 
         static constexpr bool debugProportionalText = false;
         static constexpr bool debugForceD2DMode = false;
@@ -218,6 +201,8 @@ namespace Microsoft::Console::Render::Atlas
 
             std::vector<wchar_t> bufferLine;
             std::vector<u16> bufferLineColumn;
+            Buffer<u32> colorsForeground;
+
             std::vector<TextAnalysisSinkResult> analysisResults;
             Buffer<u16> clusterMap;
             Buffer<DWRITE_SHAPING_TEXT_PROPERTIES> textProps;

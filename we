@@ -1,0 +1,28 @@
+PowerShell 7.3.2
+PS C:\Users\user> cd C:\Users\user\Desktop\chatgpt-bot-telegram-add-license-1
+PS C:\Users\user\Desktop\chatgpt-bot-telegram-add-license-1> npm i
+
+up to date, audited 30 packages in 1s
+
+1 package is looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+PS C:\Users\user\Desktop\chatgpt-bot-telegram-add-license-1> ls
+
+    Directory: C:\Users\user\Desktop\chatgpt-bot-telegram-add-license-1
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d----          16-02-2023    21:02                Helper
+d----          16-02-2023    21:12                node_modules
+-a---          17-02-2023    15:45            112 .env
+-a---          16-02-2023    21:02             17 .gitignore
+-a---          16-02-2023    21:02           1882 index.js
+-a---          17-02-2023    21:00          19440 package-lock.json
+-a---          16-02-2023    21:02            330 package.json
+-a---          16-02-2023    21:02            118 README.md
+-a---          16-02-2023    21:02            179 vercel.json
+
+PS C:\Users\user\Desktop\chatgpt-bot-telegram-add-license-1> nano key.json
+PS C:\Users\user\Desktop\chatgpt-bot-telegram-add-license-1> node index.js

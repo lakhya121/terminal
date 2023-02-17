@@ -78,22 +78,6 @@ namespace Microsoft::Console::Render::Atlas
         [[nodiscard]] HRESULT UpdateFont(const FontInfoDesired& pfiFontInfoDesired, FontInfo& fiFontInfo, const std::unordered_map<std::wstring_view, uint32_t>& features, const std::unordered_map<std::wstring_view, float>& axes) noexcept override;
         void UpdateHyperlinkHoveredId(uint16_t hoveredId) noexcept override;
 
-        // Some helper classes for the implementation.
-        // public because I don't want to sprinkle the code with friends.
-    public:
-        struct TextAnalyzerResult
-        {
-            u32 textPosition = 0;
-            u32 textLength = 0;
-
-            // These 2 fields represent DWRITE_SCRIPT_ANALYSIS.
-            // Not using DWRITE_SCRIPT_ANALYSIS drops the struct size from 20 down to 12 bytes.
-            u16 script = 0;
-            u8 shapes = 0;
-
-            u8 bidiLevel = 0;
-        };
-
     private:
         // These flags are shared with shader_ps.hlsl.
         // If you change this be sure to copy it over to shader_ps.hlsl.
@@ -122,39 +106,7 @@ namespace Microsoft::Console::Render::Atlas
 
             ATLAS_POD_OPS(AtlasKeyAttributes)
         };
-
-        struct CachedCursorOptions
-        {
-            u32 cursorColor = INVALID_COLOR;
-            u16 cursorType = gsl::narrow_cast<u16>(CursorType::Legacy);
-            u8 heightPercentage = 20;
-            u8 _padding = 0;
-
-            ATLAS_POD_OPS(CachedCursorOptions)
-        };
-
-        // Handled in BeginPaint()
-        enum class ApiInvalidations : u8
-        {
-            None = 0,
-            Title = 1 << 0,
-            Device = 1 << 1,
-            SwapChain = 1 << 2,
-            Size = 1 << 3,
-            Font = 1 << 4,
-            Settings = 1 << 5,
-        };
-        ATLAS_FLAG_OPS(ApiInvalidations, u8)
-
-        // Handled in Present()
-        enum class RenderInvalidations : u8
-        {
-            None = 0,
-            Cursor = 1 << 0,
-            ConstBuffer = 1 << 1,
-        };
-        ATLAS_FLAG_OPS(RenderInvalidations, u8)
-
+        
         // AtlasEngine.cpp
         [[nodiscard]] HRESULT _handleException(const wil::ResultException& exception) noexcept;
         __declspec(noinline) void _recreateFontDependentResources();
@@ -170,7 +122,7 @@ namespace Microsoft::Console::Render::Atlas
         // AtlasEngine.r.cpp
 
         static constexpr bool debugProportionalText = false;
-        static constexpr bool debugForceD2DMode = false;
+        static constexpr bool debugForceD2DMode = true;
         static constexpr bool debugGlyphGenerationPerformance = false;
         static constexpr bool debugTextParsingPerformance = false || debugGlyphGenerationPerformance;
         static constexpr bool debugGeneralPerformance = false || debugTextParsingPerformance;

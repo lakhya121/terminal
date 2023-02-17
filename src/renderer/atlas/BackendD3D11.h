@@ -185,8 +185,6 @@ namespace Microsoft::Console::Render::Atlas
 
         wil::com_ptr<ID3D11Device1> _device;
         wil::com_ptr<ID3D11DeviceContext1> _deviceContext;
-        wil::com_ptr<IDXGISwapChain1> _swapChain;
-        wil::unique_handle _frameLatencyWaitableObject;
         wil::com_ptr<ID3D11RenderTargetView> _renderTargetView;
         wil::com_ptr<ID3D11RenderTargetView> _renderTargetViewUInt;
 
@@ -238,7 +236,6 @@ namespace Microsoft::Console::Render::Atlas
         GlyphCacheMap _glyphCache;
         std::vector<stbrp_node> _rectPackerData;
         stbrp_context _rectPacker{};
-        std::vector<ShapedRow> _rows;
         std::vector<VertexInstanceData> _vertexInstanceData;
         u32 _instanceCount = 6;
 

@@ -254,7 +254,7 @@ namespace Microsoft::Console::Render::Atlas
         return accumulatedBounds;
     }
 
-    inline bool _drawGlyphRun(IDWriteFactory4* dwriteFactory4, ID2D1DeviceContext* d2dRenderTarget, ID2D1DeviceContext4* d2dRenderTarget4, D2D_POINT_2F baselineOrigin, const DWRITE_GLYPH_RUN* glyphRun, ID2D1SolidColorBrush* foregroundBrush) noexcept
+    inline bool _drawGlyphRun(IDWriteFactory4* dwriteFactory4, ID2D1DeviceContext* d2dRenderTarget, ID2D1DeviceContext4* d2dRenderTarget4, D2D_POINT_2F baselineOrigin, const DWRITE_GLYPH_RUN* glyphRun, ID2D1Brush* foregroundBrush) noexcept
     {
         static constexpr auto measuringMode = DWRITE_MEASURING_MODE_NATURAL;
         static constexpr auto formats =

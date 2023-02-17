@@ -559,7 +559,7 @@ void BackendD3D11::Render(const RenderingPayload& p)
                 bool beganDrawing = false;
 
                 size_t y = 0;
-                for (const auto& row : _rows)
+                for (const auto& row : p.rows)
                 {
                     const auto baselineY = p.d.font.cellSizeDIP.y * y + p.s->font->baselineInDIP;
                     f32 cumulativeAdvance = 0;

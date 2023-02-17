@@ -33,74 +33,112 @@ void BackendD2D::Render(const RenderingPayload& p)
             _deviceContext->Flush();
         });
 
-    if (_fontGeneration != p.s->font.generation())
+    if (_generation != p.s.generation())
     {
+        if (!_d2dRenderTarget)
         {
-            wil::com_ptr<ID3D11Texture2D> buffer;
-            THROW_IF_FAILED(_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), buffer.put_void()));
+            {
+                const auto surface = _swapChainManager.GetBuffer().query<IDXGISurface>();
 
-            const auto surface = buffer.query<IDXGISurface>();
-
-            D2D1_RENDER_TARGET_PROPERTIES props{};
-            props.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
-            props.pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED };
-            props.dpiX = static_cast<float>(p.s->font->dpi);
-            props.dpiY = static_cast<float>(p.s->font->dpi);
-            wil::com_ptr<ID2D1RenderTarget> renderTarget;
-            THROW_IF_FAILED(p.d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, renderTarget.addressof()));
-            _d2dRenderTarget = renderTarget.query<ID2D1DeviceContext>();
-            _d2dRenderTarget4 = renderTarget.query<ID2D1DeviceContext4>();
-            _d2dRenderTarget->SetTextAntialiasMode(static_cast<D2D1_TEXT_ANTIALIAS_MODE>(p.s->misc->antialiasingMode));
+                const D2D1_RENDER_TARGET_PROPERTIES props{
+                    .type = D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                    .pixelFormat = { DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED },
+                    .dpiX = static_cast<float>(p.s->font->dpi),
+                    .dpiY = static_cast<float>(p.s->font->dpi),
+                };
+                wil::com_ptr<ID2D1RenderTarget> renderTarget;
+                THROW_IF_FAILED(p.d2dFactory->CreateDxgiSurfaceRenderTarget(surface.get(), &props, renderTarget.addressof()));
+                _d2dRenderTarget = renderTarget.query<ID2D1DeviceContext>();
+                _d2dRenderTarget4 = renderTarget.query<ID2D1DeviceContext4>();
+                _d2dRenderTarget->SetTextAntialiasMode(static_cast<D2D1_TEXT_ANTIALIAS_MODE>(p.s->misc->antialiasingMode));
+            }
+            {
+                static constexpr D2D1_COLOR_F color{ 1, 1, 1, 1 };
+                THROW_IF_FAILED(_d2dRenderTarget->CreateSolidColorBrush(&color, nullptr, _brush.put()));
+                _brushColor = 0xffffffff;
+            }
         }
+
+        if (_fontGeneration != p.s->font.generation())
         {
-            static constexpr D2D1_COLOR_F color{ 1, 1, 1, 1 };
-            THROW_IF_FAILED(_d2dRenderTarget->CreateSolidColorBrush(&color, nullptr, _brush.put()));
-            _brushColor = 0xffffffff;
+            const auto dpi = p.s->font->dpi;
+            _d2dRenderTarget->SetDpi(dpi, dpi);
         }
+
+        if (_fontGeneration != p.s->font.generation() || _cellCount != p.s->cellCount)
         {
-            D2D1_BITMAP_PROPERTIES props{};
-            props.pixelFormat = { DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED };
-            props.dpiX = static_cast<float>(p.s->font->dpi);
-            props.dpiY = static_cast<float>(p.s->font->dpi);
-            THROW_IF_FAILED(_d2dRenderTarget->CreateBitmap({ p.s->cellCount.x, p.s->cellCount.y }, props, _d2dBackgroundBitmap.put()));
-            THROW_IF_FAILED(_d2dRenderTarget->CreateBitmapBrush(_d2dBackgroundBitmap.get(), _d2dBackgroundBrush.put()));
-            _d2dBackgroundBrush->SetInterpolationMode(D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
-            _d2dBackgroundBrush->SetTransform(D2D1::Matrix3x2F::Scale(p.s->font->cellSize.x, p.s->font->cellSize.y));
-        }
-        _fontGeneration = p.s->font.generation();
-    }
-    _d2dRenderTarget->BeginDraw();
-
-    _d2dBackgroundBitmap->CopyFromMemory(nullptr, p.backgroundBitmap.data(), p.s->cellCount.x * 4);
-    _d2dRenderTarget->FillRectangle({ 0, 0, p.s->cellCount.x * p.d.font.cellSizeDIP.x, p.s->cellCount.y * p.d.font.cellSizeDIP.y }, _d2dBackgroundBrush.get());
-
-    size_t y = 0;
-    for (const auto& row : p.rows)
-    {
-        for (const auto& m : row.mappings)
-        {
-            DWRITE_GLYPH_RUN glyphRun{};
-            glyphRun.fontFace = m.fontFace.get();
-            glyphRun.fontEmSize = m.fontEmSize;
-            glyphRun.glyphCount = m.glyphsTo - m.glyphsFrom;
-            glyphRun.glyphIndices = &row.glyphIndices[m.glyphsFrom];
-            glyphRun.glyphAdvances = &row.glyphAdvances[m.glyphsFrom];
-            glyphRun.glyphOffsets = &row.glyphOffsets[m.glyphsFrom];
-
-            const D2D1_POINT_2F baseline{
-                0, // TODO
-                p.d.font.cellSizeDIP.y * y + p.s->font->baselineInDIP,
+            const D2D1_BITMAP_PROPERTIES props{
+                .pixelFormat = { DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED },
+                .dpiX = static_cast<float>(p.s->font->dpi),
+                .dpiY = static_cast<float>(p.s->font->dpi),
             };
-
-            _drawGlyphRun(p.dwriteFactory4.get(), _d2dRenderTarget.get(), _d2dRenderTarget4.get(), baseline, &glyphRun, _brush.get());
+            const D2D1_SIZE_U size{ p.s->cellCount.x, p.s->cellCount.y };
+            const D2D1_MATRIX_3X2_F transform {
+                ._11 = static_cast<float>(p.s->font->cellSize.x),
+                ._22 = static_cast<float>(p.s->font->cellSize.y),
+            };
+            
+            {
+                THROW_IF_FAILED(_d2dRenderTarget->CreateBitmap(size, nullptr, 0, &props, _d2dBackgroundBitmap.put()));
+                THROW_IF_FAILED(_d2dRenderTarget->CreateBitmapBrush(_d2dBackgroundBitmap.get(), _d2dBackgroundBrush.put()));
+                _d2dBackgroundBrush->SetInterpolationMode(D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+                _d2dBackgroundBrush->SetTransform(&transform);
+            }
+            {
+                THROW_IF_FAILED(_d2dRenderTarget->CreateBitmap(size, nullptr, 0, &props, _d2dForegroundBitmap.put()));
+                THROW_IF_FAILED(_d2dRenderTarget->CreateBitmapBrush(_d2dForegroundBitmap.get(), _d2dForegroundBrush.put()));
+                _d2dForegroundBrush->SetInterpolationMode(D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+                _d2dForegroundBrush->SetTransform(&transform);
+            }
         }
 
-        y++;
+        _generation = p.s.generation();
+        _fontGeneration = p.s->font.generation();
+        _cellCount = p.s->cellCount;
     }
 
+    _d2dRenderTarget->BeginDraw();
+    {
+        _d2dRenderTarget->Clear();
+
+        // Let's say the terminal is 120x30 cells and 1200x600 pixels large respectively.
+        // This draws the background color by upscaling a 120x30 pixel bitmap to fill the 1200x600 pixel render target.
+        {
+            const D2D1_RECT_F rect{ 0, 0, p.s->cellCount.x * p.d.font.cellSizeDIP.x, p.s->cellCount.y * p.d.font.cellSizeDIP.y };
+            _d2dBackgroundBitmap->CopyFromMemory(nullptr, p.backgroundBitmap.data(), p.s->cellCount.x * 4);
+            _d2dRenderTarget->FillRectangle(&rect, _d2dBackgroundBrush.get());
+        }
+
+        {
+            const D2D1_RECT_F rect{ 0, 0, p.s->cellCount.x * p.d.font.cellSizeDIP.x, p.s->cellCount.y * p.d.font.cellSizeDIP.y };
+            _d2dForegroundBitmap->CopyFromMemory(nullptr, p.foregroundBitmap.data(), p.s->cellCount.x * 4);
+        }
+
+        size_t y = 0;
+        for (const auto& row : p.rows)
+        {
+            for (const auto& m : row.mappings)
+            {
+                const DWRITE_GLYPH_RUN glyphRun{
+                    .fontFace = m.fontFace.get(),
+                    .fontEmSize = m.fontEmSize,
+                    .glyphCount = m.glyphsTo - m.glyphsFrom,
+                    .glyphIndices = &row.glyphIndices[m.glyphsFrom],
+                    .glyphAdvances = &row.glyphAdvances[m.glyphsFrom],
+                    .glyphOffsets = &row.glyphOffsets[m.glyphsFrom],
+                };
+                const D2D1_POINT_2F baseline{
+                    .y = p.d.font.cellSizeDIP.y * y + p.s->font->baselineInDIP,
+                };
+                _drawGlyphRun(p.dwriteFactory4.get(), _d2dRenderTarget.get(), _d2dRenderTarget4.get(), baseline, &glyphRun, _d2dForegroundBrush.get());
+            }
+
+            y++;
+        }
+    }
     THROW_IF_FAILED(_d2dRenderTarget->EndDraw());
 
-    THROW_IF_FAILED(_d2dRenderTarget->EndDraw());
+    _swapChainManager.Present(p);
 }
 
 bool BackendD2D::RequiresContinuousRedraw() noexcept
@@ -110,6 +148,7 @@ bool BackendD2D::RequiresContinuousRedraw() noexcept
 
 void BackendD2D::WaitUntilCanRender() noexcept
 {
+    _swapChainManager.WaitUntilCanRender();
 }
 
 ID2D1Brush* BackendD2D::_brushWithColor(u32 color)

@@ -349,9 +349,9 @@ namespace Microsoft::Console::Render::Atlas
 
     struct FontDependents
     {
-        wil::com_ptr<IDWriteTextFormat> textFormats[2][2];
+        //wil::com_ptr<IDWriteTextFormat> textFormats[2][2];
         Buffer<DWRITE_FONT_AXIS_VALUE> textFormatAxes[2][2];
-        wil::com_ptr<IDWriteTypography> typography;
+        //wil::com_ptr<IDWriteTypography> typography;
         f32 dipPerPixel = 1.0f; // caches USER_DEFAULT_SCREEN_DPI / dpi
         f32 pixelPerDIP = 1.0f; // caches dpi / USER_DEFAULT_SCREEN_DPI
         f32x2 cellSizeDIP; // caches cellSize in DIP
@@ -418,6 +418,7 @@ namespace Microsoft::Console::Render::Atlas
         // Parameters which change every frame.
         std::vector<ShapedRow> rows;
         std::vector<u32> backgroundBitmap;
+        std::vector<u32> foregroundBitmap;
         u16r cursorRect;
         til::rect dirtyRect;
         i16 scrollOffset = 0;

@@ -163,7 +163,7 @@ try
         _p.rows[y].clear();
     }
 
-    _api.dirtyRect = til::rect{ 0, _api.invalidatedRows.x, _p.s->cellCount.x, _api.invalidatedRows.y };
+    _api.dirtyRect = til::rect{ 0, 0, _p.s->cellCount.x, _p.s->cellCount.y }; //til::rect{ 0, _api.invalidatedRows.x, _p.s->cellCount.x, _api.invalidatedRows.y };
     _p.dirtyRect = _api.dirtyRect;
     _p.scrollOffset = _api.scrollOffset;
 
@@ -257,6 +257,7 @@ try
 
         std::fill(_api.colorsForeground.begin() + x, _api.colorsForeground.begin() + column, _api.currentColor.x);
         std::fill_n(_p.backgroundBitmap.begin() + (y * _p.s->cellCount.x + x), column - x, _api.currentColor.y);
+        std::fill_n(_p.foregroundBitmap.begin() + (y * _p.s->cellCount.x + x), column - x, _api.currentColor.x);
     }
 
     _api.lastPaintBufferLineCoord = { x, y };
@@ -459,6 +460,11 @@ void AtlasEngine::_recreateFontDependentResources()
             }
         }
     }
+    
+    _p.d.font.dipPerPixel = static_cast<float>(USER_DEFAULT_SCREEN_DPI) / static_cast<float>(_p.s->font->dpi);
+    _p.d.font.pixelPerDIP = static_cast<float>(_p.s->font->dpi) / static_cast<float>(USER_DEFAULT_SCREEN_DPI);
+    _p.d.font.cellSizeDIP.x = static_cast<float>(_p.s->font->cellSize.x) * _p.d.font.dipPerPixel;
+    _p.d.font.cellSizeDIP.y = static_cast<float>(_p.s->font->cellSize.y) * _p.d.font.dipPerPixel;
 }
 
 void AtlasEngine::_recreateCellCountDependentResources()
@@ -484,6 +490,7 @@ void AtlasEngine::_recreateCellCountDependentResources()
 
     _p.rows = std::vector<ShapedRow>(_p.s->cellCount.y);
     _p.backgroundBitmap = std::vector<u32>(static_cast<size_t>(_p.s->cellCount.x) * _p.s->cellCount.y);
+    _p.foregroundBitmap = std::vector<u32>(static_cast<size_t>(_p.s->cellCount.x) * _p.s->cellCount.y);
 }
 
 const Buffer<DWRITE_FONT_AXIS_VALUE>& AtlasEngine::_getTextFormatAxis(bool bold, bool italic) const noexcept
